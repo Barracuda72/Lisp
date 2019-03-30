@@ -1,8 +1,50 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#ifdef _WIN32
+
+/* Fake Readline on Windows */
+char* readline(const char* prompt)
+{
+  const size_t buffer_len = 2048;
+  char* buffer = (char*)malloc(buffer_len);
+
+  /* Output prompt */
+  fputs(prompt, stdout);
+
+  /* Read input*/
+  char* result = fgets(buffer, buffer_len, stdin);
+
+  /* If read went fine */
+  if (result != NULL)
+  {
+    /* Terminate input string */
+    size_t len = strnlen(buffer, buffer_len);
+    buffer[len-1] = 0;
+
+    return buffer;
+  } else {
+    /* Something was wrong */
+    free(buffer);
+    return NULL;
+  }
+}
+
+/* Stub */
+void add_history(const char* line) 
+{
+  /* Do nothing */
+  (void)line;
+}
+
+#undef BUFFER_LEN
+
+#else
+
 #include <readline/readline.h>
 #include <readline/history.h>
+
+#endif /* _WIN32 */
 
 const char* copyright =
   "Lisp version 0.0.1 Copyright (C) 2019 Barracuda72\n"
