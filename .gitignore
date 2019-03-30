@@ -56,3 +56,7 @@ dkms.conf
 
 # Ignore target binary
 lisp
+
+# Bison/lex files
+y.*
+lex.*
