@@ -53,3 +53,6 @@ dkms.conf
 
 # Vim temporary files
 .*.swp
+
+# Ignore target binary
+lisp
