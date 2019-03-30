@@ -4,8 +4,19 @@ LD=gcc
 LDFLAGS=-lc -lreadline
 TARGET=lisp
 
-$(TARGET): main.o
+ifeq ($(DEBUG),1)
+  Y_DBG=-t
+  CFLAGS += -DDEBUG
+endif
+
+$(TARGET): main.o tree.o y.tab.o lex.yy.o
 	$(LD) $(LDFLAGS) $^ -o $@
 
+y.tab.c: lisp.y
+	yacc ${Y_DBG} -d $^ --verbose
+
+lex.yy.c: lisp.lex
+	lex $^
+
 clean:
-	-rm $(TARGET) *.o
+	-rm $(TARGET) *.o lex.* y.*
