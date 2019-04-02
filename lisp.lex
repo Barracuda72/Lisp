@@ -14,7 +14,7 @@ int yycharpos = 1;
 
 #define BUFFER_SIZE 1024
 static char buffer[BUFFER_SIZE];
-const char* strdup(const char* s)
+static const char* strdup(const char* s)
 {
   strncpy(buffer, s, BUFFER_SIZE);
   buffer[BUFFER_SIZE-1] = 0;
@@ -45,9 +45,11 @@ comment           ;[^\n]*
 
 %%
 
+{real}               yylval = strdup(yytext); return (TOK_REAL);
 {integer}            yylval = strdup(yytext); return (TOK_INTEGER);
 
-[+*/()-]             return (yytext[0]);
+[()]                 return (yytext[0]);
+[%+*/-]              yylval = strdup(yytext); return (TOK_SYMBOL);
 
 {white_space}        /* Skip whitespaces */
 {comment}            /* Skip comments */

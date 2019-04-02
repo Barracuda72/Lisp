@@ -1,4 +1,4 @@
-CFLAGS=-std=c18 -pedantic -Wall -Wextra -O2 -g
+CFLAGS=-std=c18 -pedantic -Wall -Wextra
 CC=gcc
 LD=gcc
 LDFLAGS=-lc -lreadline
@@ -6,7 +6,9 @@ TARGET=lisp
 
 ifeq ($(DEBUG),1)
   Y_DBG=-t
-  CFLAGS += -DDEBUG
+  CFLAGS += -DDEBUG -O0 -g
+else
+  CFLAGS += -O2
 endif
 
 $(TARGET): main.o tree.o y.tab.o lex.yy.o
