@@ -47,8 +47,9 @@ comment           ;[^\n]*
 
 {real}               yylval = strdup(yytext); return (TOK_REAL);
 {integer}            yylval = strdup(yytext); return (TOK_INTEGER);
+{identifier}         yylval = strdup(yytext); return (TOK_SYMBOL);
 
-[()]                 return (yytext[0]);
+[(){}]               return (yytext[0]);
 [%+*/-]              yylval = strdup(yytext); return (TOK_SYMBOL);
 
 {white_space}        /* Skip whitespaces */

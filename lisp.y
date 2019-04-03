@@ -85,8 +85,8 @@ tree *root = NULL;
  */
 program:
   expression_list { 
-    root = (tree*)$1;
-    $$ = $1;
+    root = tree_create((tree*)$1, NULL, NODE_VAR_DECL);
+    $$ = (YYSTYPE)root;
   }
   ;
 
@@ -98,11 +98,16 @@ expression_list:
 expression:
   number { $$ = $1; } |
   symbol { $$ = $1; } |
-  sexpression { $$ = $1; }
+  sexpression { $$ = $1; } |
+  qexpression { $$ = $1; }
+  ;
+
+qexpression:
+  '{' expression_list '}' { $$ = (YYSTYPE)tree_create((tree*)$2, NULL, NODE_CONST_DECL); }
   ;
 
 sexpression:
-  '(' expression_list ')' { $$ = $2; }
+  '(' expression_list ')' { $$ = (YYSTYPE)tree_create((tree*)$2, NULL, NODE_VAR_DECL); }
   ;
 
 symbol:
