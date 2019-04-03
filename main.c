@@ -139,7 +139,11 @@ typedef struct _lval
     char* err;
     char* sym;
     double fnum;
-    lbuiltin fun;
+    struct {
+      lbuiltin fun;
+      const char* name;
+      int builtin;
+    };
     struct {
       int count;
       struct _lval** cell;
@@ -192,15 +196,21 @@ lval* lenv_get(lenv* e, lval* k)
 }
 
 /* Put value into environment */
-void lenv_put(lenv* e, lval* k, lval* v)
+int lenv_put(lenv* e, lval* k, lval* v)
 {
   /* First check if this symbol already exists */
   for (int i = 0; i < e->count; i++)
     if (!strcmp(e->syms[i], k->sym))
     {
-      lval_del(e->vals[i]);
+      lval* o = e->vals[i];
+      if ((o->type == LVAL_FUN) && o->builtin)
+      {
+        /* Forbid built-ins redefinition */
+        return 1;
+      }
+      lval_del(o);
       e->vals[i] = lval_copy(v);
-      return;
+      return 0;
     }
 
   /* If it isn't, then put it there */
@@ -211,6 +221,8 @@ void lenv_put(lenv* e, lval* k, lval* v)
   e->vals[e->count-1] = lval_copy(v);
   e->syms[e->count-1] = (char*)malloc(strlen(k->sym)+1);
   strcpy(e->syms[e->count-1], k->sym);
+
+  return 0;
 }
 
 /* Create number */
@@ -282,12 +294,19 @@ lval* lval_qexpr(void)
 }
 
 /* Create function */
-lval* lval_fun(lbuiltin f)
+lval* lval_fun_ex(lbuiltin f, const char* name, int builtin)
 {
   lval* v = (lval*)malloc(sizeof(lval));
   v->type = LVAL_FUN;
   v->fun = f;
+  v->name = name;
+  v->builtin = builtin;
   return v;
+}
+
+lval* lval_fun(lbuiltin f)
+{
+  return lval_fun_ex(f, NULL, 0);
 }
 
 /* Clear memory occupied by lval */
@@ -333,6 +352,8 @@ lval* lval_copy(lval* v)
   {
     case LVAL_FUN:
       x->fun = v->fun;
+      x->name = v->name;
+      x->builtin = v->builtin;
       break;
 
     case LVAL_NUMBER:
@@ -494,7 +515,10 @@ void lval_print(lval* v)
       break;
 
     case LVAL_FUN:
-      fprintf(stdout, "<function>");
+      if (v->builtin)
+        fprintf(stdout, "<function '%s'>", v->name);
+      else
+        fprintf(stdout, "<function>");
       break;
 
     default:
@@ -589,6 +613,7 @@ lval* lval_join(lval* x, lval* y)
   return x;
 }
 
+/* Join two lists together */
 lval* builtin_join(lenv* e, lval* a)
 {
   for (int i = 0; i < a->count; i++)
@@ -604,7 +629,7 @@ lval* builtin_join(lenv* e, lval* a)
   return x;
 }
 
-
+/* Remove last element of list */
 lval* builtin_init(lenv* e, lval* a)
 {
   LASSERT_COUNT(a, "init", 1);
@@ -624,6 +649,7 @@ lval* builtin_init(lenv* e, lval* a)
   return x;
 }
 
+/* Calculate length of list */
 lval* builtin_len(lenv* e, lval* a)
 {
   LASSERT_COUNT(a, "len", 1);
@@ -634,6 +660,14 @@ lval* builtin_len(lenv* e, lval* a)
   return lval_num(len);
 }
 
+/* Exit command prompt */
+lval* builtin_exit(lenv* e, lval* a)
+{
+  /* TODO */
+  return lval_sexpr();
+}
+
+/* Prepend element to list */
 lval* builtin_cons(lenv* e, lval* a)
 {
   LASSERT_COUNT(a, "cons", 2);
@@ -647,6 +681,21 @@ lval* builtin_cons(lenv* e, lval* a)
   x = lval_join(x, v);
 
   return x;
+}
+
+lval* builtin_env(lenv* e, lval* a)
+{
+  lval* v = lval_qexpr();
+
+  for (int i = 0; i < e->count; i++)
+  {
+    lval* p = lval_qexpr();
+    lval_add(p, lval_sym(e->syms[i]));
+    lval_add(p, lval_copy(e->vals[i]));
+    lval_add(v, p);
+  }
+
+  return v;
 }
 
 lval* builtin_op(lenv* e, lval* a, const char* op)
@@ -746,18 +795,25 @@ lval* builtin_def(lenv* e, lval* x)
     "parameter lengths differ (%d vs %d)",
     syms->count, x->count-1);
 
+  lval* ret = lval_sexpr();
+
   for (int i = 0; i < syms->count; i++)
-    lenv_put(e, syms->cell[i], x->cell[i+1]);
+    if (lenv_put(e, syms->cell[i], x->cell[i+1]))
+    {
+      lval_del(ret);
+      ret = lval_err("Redefinition of '%s' is forbidden", syms->cell[i]->sym);
+      break;
+    }
 
   lval_del(x);
 
-  return lval_sexpr();
+  return ret;
 }
 
 void lenv_add_builtin(lenv* e, const char* name, lbuiltin f)
 {
   lval* k = lval_sym(name);
-  lval* v = lval_fun(f);
+  lval* v = lval_fun_ex(f, name, 1);
   lenv_put(e, k, v);
   lval_del(k);
   lval_del(v);
@@ -773,10 +829,13 @@ void lenv_add_builtins(lenv* e)
   lenv_add_builtin(e, "cdr", builtin_tail);
   lenv_add_builtin(e, "eval", builtin_eval);
   lenv_add_builtin(e, "join", builtin_join);
+  lenv_add_builtin(e, "append", builtin_join);
   lenv_add_builtin(e, "cons", builtin_cons);
   lenv_add_builtin(e, "init", builtin_init);
   lenv_add_builtin(e, "len", builtin_len);
   lenv_add_builtin(e, "def", builtin_def);
+  lenv_add_builtin(e, "exit", builtin_exit);
+  lenv_add_builtin(e, "env", builtin_env);
 
   /* Mathematical Functions */
   lenv_add_builtin(e, "+", builtin_add);
