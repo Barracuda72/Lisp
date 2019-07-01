@@ -47,8 +47,6 @@ void add_history(const char* line)
   (void)line;
 }
 
-#undef BUFFER_LEN
-
 #else
 
 #include <readline/readline.h>
