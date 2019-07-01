@@ -29,7 +29,7 @@ static const char* strdup(const char* s)
 
 white_space       [ \t]*
 digit             [0-9]
-alpha             [A-Za-z_\\&-]
+alpha             [|A-Za-z_\\&>=<!^-]
 alpha_num         ({alpha}|{digit})
 hex_digit         [0-9A-Fa-f]
 identifier        {alpha}{alpha_num}*

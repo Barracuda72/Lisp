@@ -634,6 +634,44 @@ lval* lval_take(lval* v, int i)
   return x;
 }
 
+int lval_eq(lval* x, lval* y) 
+{
+  if (x->type != y->type) 
+    return 0;
+
+  switch (x->type) 
+  {
+    case LVAL_NUMBER: 
+      return (x->num == y->num);
+
+    case LVAL_FNUMBER: 
+      return (x->fnum == y->fnum);
+
+    case LVAL_ERROR: 
+      return !strcmp(x->err, y->err);
+    case LVAL_SYM: 
+      return !strcmp(x->sym, y->sym);
+
+    case LVAL_FUN:
+      if (x->is_builtin || y->is_builtin)
+        return x->builtin == y->builtin;
+      else
+        return lval_eq(x->formals, y->formals)
+          && lval_eq(x->body, y->body);
+
+    case LVAL_QEXPR:
+    case LVAL_SEXPR:
+      if (x->count != y->count) 
+        return 0;
+      for (int i = 0; i < x->count; i++)
+        if (!lval_eq(x->cell[i], y->cell[i]))
+          return 0;
+      return 1;
+  }
+
+  return 0;
+}
+
 /* Forward declaration */
 lval* lval_eval(lenv* e, lval* v);
 
@@ -873,10 +911,10 @@ lval* builtin_var(lenv* e, lval* x, const char* func)
 
   int (*putter)(lenv*, lval*, lval*) = NULL;
 
-  if (strcmp(func, "def") == 0)
+  if (!strcmp(func, "def"))
     putter = lenv_def;
 
-  if (strcmp(func, "=") == 0)
+  if (!strcmp(func, "="))
     putter = lenv_put;
 
   assert(putter != NULL);
@@ -928,6 +966,167 @@ lval* builtin_put(lenv* e, lval* a)
   return builtin_var(e, a, "=");
 }
 
+/* Comparison */
+int lval_less(lval* a, lval* b)
+{
+  /* If one of them is float, compare as floats */
+  if (a->type == LVAL_NUMBER && b->type == LVAL_FNUMBER)
+    return a->num < b->fnum;
+  
+  if (a->type == LVAL_FNUMBER && b->type == LVAL_NUMBER)
+    return a->fnum < b->num;
+  
+  if (a->type == LVAL_FNUMBER && b->type == LVAL_FNUMBER)
+    return a->fnum < b->fnum;
+  
+  if (a->type == LVAL_NUMBER && a->type == LVAL_NUMBER) 
+    return a->num < b->num;
+
+  assert(0);
+}
+
+lval* builtin_ord(lenv* e, lval* a, char* op)
+{
+  LASSERT_COUNT(a, op, 2);
+  LASSERT_TYPE(a, op, 0, LVAL_NUMBER);
+  LASSERT_TYPE(a, op, 1, LVAL_NUMBER);
+
+  int result = -1;
+  lval* x = a->cell[0];
+  lval* y = a->cell[1];
+
+  if (!strcmp(op, ">"))
+    result = lval_less(y, x);
+  if (strcmp(op, "<")  == 0)
+    result = lval_less(x, y);
+  if (strcmp(op, ">=") == 0)
+    result = !lval_less(x, y);
+  if (strcmp(op, "<=") == 0)
+    result = !lval_less(y, x);
+
+  lval_del(a);
+
+  assert(result >= 0);
+
+  return lval_num(result);
+}
+
+lval* builtin_gt(lenv* e, lval* a)
+{
+  return builtin_ord(e, a, ">");
+}
+
+lval* builtin_lt(lenv* e, lval* a)
+{
+  return builtin_ord(e, a, "<");
+}
+
+lval* builtin_ge(lenv* e, lval* a)
+{
+  return builtin_ord(e, a, ">=");
+}
+
+lval* builtin_le(lenv* e, lval* a)
+{
+  return builtin_ord(e, a, "<=");
+}
+
+lval* builtin_cmp(lenv* e, lval* a, char* op) 
+{
+  LASSERT_COUNT(a, op, 2);
+
+  int r = -1;
+  
+  if (!strcmp(op, "=="))
+    r =  lval_eq(a->cell[0], a->cell[1]);
+  
+  if (!strcmp(op, "!="))
+    r = !lval_eq(a->cell[0], a->cell[1]);
+
+  assert(r >= 0);
+
+  lval_del(a);
+  return lval_num(r);
+}
+
+lval* builtin_eq(lenv* e, lval* a) 
+{
+  return builtin_cmp(e, a, "==");
+}
+
+lval* builtin_ne(lenv* e, lval* a) 
+{
+  return builtin_cmp(e, a, "!=");
+}
+
+lval* builtin_if(lenv* e, lval* a) 
+{
+  LASSERT_COUNT(a, "if", 3);
+  LASSERT_TYPE(a, "if", 0, LVAL_NUMBER);
+  LASSERT_TYPE(a, "if", 1, LVAL_QEXPR);
+  LASSERT_TYPE(a, "if", 2, LVAL_QEXPR);
+
+  lval* x;
+  a->cell[1]->type = LVAL_SEXPR;
+  a->cell[2]->type = LVAL_SEXPR;
+
+  if (a->cell[0]->num)
+    x = lval_eval(e, lval_pop(a, 1));
+  else
+    x = lval_eval(e, lval_pop(a, 2));
+
+  lval_del(a);
+  return x;
+}
+
+lval* builtin_and(lenv* e, lval* a)
+{
+  LASSERT_COUNT(a, "and", 2);
+  LASSERT_TYPE(a, "and", 0, LVAL_NUMBER);
+  LASSERT_TYPE(a, "and", 1, LVAL_NUMBER);
+
+  int r = a->cell[0]->num && a->cell[1]->num;
+
+  lval_del(a);
+  return lval_num(r);
+}
+
+lval* builtin_or(lenv* e, lval* a)
+{
+  LASSERT_COUNT(a, "or", 2);
+  LASSERT_TYPE(a, "or", 0, LVAL_NUMBER);
+  LASSERT_TYPE(a, "or", 1, LVAL_NUMBER);
+
+  int r = a->cell[0]->num || a->cell[1]->num;
+
+  lval_del(a);
+  return lval_num(r);
+}
+
+lval* builtin_xor(lenv* e, lval* a)
+{
+  LASSERT_COUNT(a, "xor", 2);
+  LASSERT_TYPE(a, "xor", 0, LVAL_NUMBER);
+  LASSERT_TYPE(a, "xor", 1, LVAL_NUMBER);
+
+  int r = a->cell[0]->num ^ a->cell[1]->num;
+
+  lval_del(a);
+  return lval_num(r);
+}
+
+lval* builtin_not(lenv* e, lval* a)
+{
+  LASSERT_COUNT(a, "not", 1);
+  LASSERT_TYPE(a, "not", 0, LVAL_NUMBER);
+
+  int r = !(a->cell[0]->num);
+
+  lval_del(a);
+  return lval_num(r);
+}
+
+/* Environment functions */
 void lenv_add_builtin(lenv* e, const char* name, lbuiltin f)
 {
   lval* k = lval_sym(name);
@@ -964,6 +1163,25 @@ void lenv_add_builtins(lenv* e)
   lenv_add_builtin(e, "*", builtin_mul);
   lenv_add_builtin(e, "/", builtin_div);
   lenv_add_builtin(e, "%", builtin_mod);
+
+  /* Comparison Functions */
+  lenv_add_builtin(e, "if", builtin_if);
+  lenv_add_builtin(e, "==", builtin_eq);
+  lenv_add_builtin(e, "!=", builtin_ne);
+  lenv_add_builtin(e, ">",  builtin_gt);
+  lenv_add_builtin(e, "<",  builtin_lt);
+  lenv_add_builtin(e, ">=", builtin_ge);
+  lenv_add_builtin(e, "<=", builtin_le);
+
+  /* Logical functions */
+  lenv_add_builtin(e, "and", builtin_and);
+  lenv_add_builtin(e, "or", builtin_or);
+  lenv_add_builtin(e, "xor", builtin_xor);
+  lenv_add_builtin(e, "not", builtin_not);
+  lenv_add_builtin(e, "&&", builtin_and);
+  lenv_add_builtin(e, "||", builtin_or);
+  lenv_add_builtin(e, "^", builtin_xor);
+  lenv_add_builtin(e, "!", builtin_not);
 }
 
 lval* lval_eval_sexpr(lenv* e, lval* v)
@@ -1028,7 +1246,7 @@ lval* lval_call(lenv* e, lval* f, lval* a)
     lval* sym = lval_pop(f->formals, 0);
 
     /* Special Case to deal with '&' */
-    if (strcmp(sym->sym, "&") == 0) 
+    if (!strcmp(sym->sym, "&")) 
     {
       /* Ensure '&' is followed by another symbol */
       if (f->formals->count != 1) 
@@ -1055,7 +1273,7 @@ lval* lval_call(lenv* e, lval* f, lval* a)
   lval_del(a);
 
   if (f->formals->count > 0 &&
-    strcmp(f->formals->cell[0]->sym, "&") == 0) 
+    !strcmp(f->formals->cell[0]->sym, "&")) 
   {
     
     if (f->formals->count != 2) 
