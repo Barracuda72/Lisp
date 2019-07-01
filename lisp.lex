@@ -27,7 +27,7 @@ static const char* strdup(const char* s)
 %option case-insensitive
 %option yylineno
 
-white_space       [ \t]*
+white_space       [ \t\r]*
 digit             [0-9]
 alpha             [|A-Za-z_\\&>=<!^-]
 alpha_num         ({alpha}|{digit})
@@ -48,6 +48,8 @@ comment           ;[^\n]*
 {real}               yylval = strdup(yytext); return (TOK_REAL);
 {integer}            yylval = strdup(yytext); return (TOK_INTEGER);
 {identifier}         yylval = strdup(yytext); return (TOK_SYMBOL);
+{string}             yylval = strdup(yytext); return (TOK_STRING);
+{string2}            yylval = strdup(yytext); return (TOK_STRING);
 
 [(){}]               return (yytext[0]);
 [%+*/-]              yylval = strdup(yytext); return (TOK_SYMBOL);

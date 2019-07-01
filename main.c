@@ -114,7 +114,7 @@ extern int yydebug;
  */
 
 /* Possible lval types */
-typedef enum { LVAL_FUN, LVAL_NUMBER, LVAL_FNUMBER, LVAL_ERROR, LVAL_SYM, LVAL_SEXPR, LVAL_QEXPR } lval_type_t;
+typedef enum { LVAL_STR, LVAL_FUN, LVAL_NUMBER, LVAL_FNUMBER, LVAL_ERROR, LVAL_SYM, LVAL_SEXPR, LVAL_QEXPR } lval_type_t;
 
 /* Forward declarations */
 struct _lval;
@@ -139,6 +139,7 @@ typedef struct _lval
     long num;
     char* err;
     char* sym;
+    char* str;
     double fnum;
     struct {
       lbuiltin builtin;
@@ -360,6 +361,18 @@ lval* lval_lambda(lval* formals, lval* body)
   return v;
 }
 
+/* Create string */
+lval* lval_str(const char* s) 
+{
+  lval* v = (lval*)malloc(sizeof(lval));
+
+  v->type = LVAL_STR;
+  v->str = (char*)malloc(strlen(s) + 1);
+  strcpy(v->str, s);
+  
+  return v;
+}
+
 /* Clear memory occupied by lval */
 void lval_del(lval* v)
 {
@@ -384,6 +397,10 @@ void lval_del(lval* v)
 
     case LVAL_ERROR:
       free(v->err);
+      break;
+
+    case LVAL_STR:
+      free(v->str);
       break;
 
     case LVAL_SEXPR:
@@ -440,6 +457,11 @@ lval* lval_copy(lval* v)
       strcpy(x->sym, v->sym);
       break;
 
+    case LVAL_STR:
+      x->str = (char*)malloc(strlen(v->str)+1);
+      strcpy(x->str, v->str);
+      break;
+
     case LVAL_SEXPR:
     case LVAL_QEXPR:
       x->count = v->count;
@@ -471,6 +493,19 @@ lval* lval_read_fnum(tree* t)
   return errno != ERANGE ? lval_fnum(x) : lval_err("Invalid floating number");
 }
 
+lval* lval_read_str(tree* t) 
+{
+  char* contents = (char*)t->value;
+  contents[strlen(contents)-1] = '\0';
+  char* unescaped = (char*)malloc(strlen(contents+1)+1);
+  strcpy(unescaped, contents+1);
+  //TODO: unescape
+  //unescaped = mpcf_unescape(unescaped);
+  lval* str = lval_str(unescaped);
+  free(unescaped);
+  return str;
+}
+
 lval* lval_add(lval* v, lval* x)
 {
   v->count++;
@@ -486,6 +521,9 @@ lval* lval_read(tree* t)
 
   if (t->type == NODE_CFLOAT) 
     return lval_read_fnum(t);
+
+  if (t->type == NODE_CSTRING) 
+    return lval_read_str(t);
 
   if (t->type == NODE_IDENTIFIER) 
     return lval_sym((char*)t->value);
@@ -523,6 +561,9 @@ const char* ltype_name(lval_type_t t)
     case LVAL_ERROR:
       return "Error";
 
+    case LVAL_STR:
+      return "String";
+
     case LVAL_FUN:
       return "Function";
 
@@ -551,6 +592,17 @@ void lval_expr_print(lval* v, char open, char close)
   fputc(close, stdout);
 }
 
+/* Print string */
+void lval_print_str(lval* v) 
+{
+  char* escaped = malloc(strlen(v->str)+1);
+  strcpy(escaped, v->str);
+  // TODO: escape!
+  //escaped = mpcf_escape(escaped);
+  fprintf(stdout, "\"%s\"", escaped);
+  free(escaped);
+}
+
 /* Print lval */
 void lval_print(lval* v)
 {
@@ -570,6 +622,10 @@ void lval_print(lval* v)
 
     case LVAL_SYM:
       fprintf(stdout, "%s", v->sym);
+      break;
+
+    case LVAL_STR:
+      lval_print_str(v);
       break;
 
     case LVAL_SEXPR:
@@ -651,6 +707,8 @@ int lval_eq(lval* x, lval* y)
       return !strcmp(x->err, y->err);
     case LVAL_SYM: 
       return !strcmp(x->sym, y->sym);
+    case LVAL_STR: 
+      return !strcmp(x->str, y->str);
 
     case LVAL_FUN:
       if (x->is_builtin || y->is_builtin)
@@ -1126,6 +1184,103 @@ lval* builtin_not(lenv* e, lval* a)
   return lval_num(r);
 }
 
+/* Script loading */
+lval* builtin_load(lenv* e, lval* a) 
+{
+  LASSERT_COUNT(a, "load", 1);
+  LASSERT_TYPE(a, "load", 0, LVAL_STR);
+
+  /* Parse File given by string name */
+  char* input = NULL;
+  FILE* f = fopen(a->cell[0]->str, "r");
+  if (f != NULL)
+  {
+    fseek(f, 0, SEEK_END);
+    int size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    input = (char*)malloc(size+1);
+
+    fread(input, size, 1, f);
+    fclose(f);
+
+    input[size] = 0;
+  
+    YY_BUFFER_STATE buffer = yy_scan_string(input);
+    yyparse();
+    yy_delete_buffer(buffer);
+  
+    free(input);
+  }
+  
+  // TODO: better error handling
+
+  if (f != NULL)
+  {
+    /* Read contents */
+    lval* expr = lval_read(root);
+
+    /* Free string pool used by parser */
+    free_pool();
+
+    /* Evaluate each Expression */
+    while (expr->count) 
+    {
+      lval* x = lval_eval(e, lval_pop(expr, 0));
+      /* If Evaluation leads to error print it */
+      if (x->type == LVAL_ERROR) 
+        lval_println(x);
+      lval_del(x);
+    }
+
+    /* Delete expressions and arguments */
+    lval_del(expr);
+    lval_del(a);
+
+    /* Return empty list */
+    return lval_sexpr();
+  } else {
+    /* Create new error message using it */
+    lval* err = lval_err("Could not load Library %s", a->cell[0]->str);
+
+    lval_del(a);
+
+    /* Cleanup and return error */
+    return err;
+  }
+}
+
+/* Print */
+lval* builtin_print(lenv* e, lval* a) 
+{
+  /* Print each argument followed by a space */
+  for (int i = 0; i < a->count; i++) 
+  {
+    lval_print(a->cell[i]); 
+    fputc(' ', stdout);
+  }
+
+  /* Print a newline and delete arguments */
+  fputc('\n', stdout);
+  lval_del(a);
+
+  return lval_sexpr();
+}
+
+/* Error geenration */
+lval* builtin_error(lenv* e, lval* a) 
+{
+  LASSERT_COUNT(a, "error", 1);
+  LASSERT_TYPE(a, "error", 0, LVAL_STR);
+
+  /* Construct Error from first argument */
+  lval* err = lval_err(a->cell[0]->str);
+
+  /* Delete arguments and return */
+  lval_del(a);
+  return err;
+}
+
 /* Environment functions */
 void lenv_add_builtin(lenv* e, const char* name, lbuiltin f)
 {
@@ -1182,6 +1337,11 @@ void lenv_add_builtins(lenv* e)
   lenv_add_builtin(e, "||", builtin_or);
   lenv_add_builtin(e, "^", builtin_xor);
   lenv_add_builtin(e, "!", builtin_not);
+
+  /* Misc */
+  lenv_add_builtin(e, "load",  builtin_load);
+  lenv_add_builtin(e, "error", builtin_error);
+  lenv_add_builtin(e, "print", builtin_print);
 }
 
 lval* lval_eval_sexpr(lenv* e, lval* v)
@@ -1352,42 +1512,61 @@ int main(int argc, char* argv[])
   lenv* e = lenv_new();
   lenv_add_builtins(e);
 
-  /* Never-ending prompt */
-  while (1)
-  {
-    /* Output prompt and read user input */
-    char* input = readline("lisp> ");
-
-    /* Ctrl+D was pressed, terminate session */
-    if (input == NULL)
+  /* Supplied with list of files */
+  if (argc >= 2) {
+    /* loop over each supplied filename (starting from 1) */
+    for (int i = 1; i < argc; i++) 
     {
-      fputc('\n', stdout);
-      break;
+      /* Argument list with a single argument, the filename */
+      lval* args = lval_add(lval_sexpr(), lval_str(argv[i]));
+  
+      /* Pass to builtin load and get the result */
+      lval* x = builtin_load(e, args);
+  
+      /* If the result is an error be sure to print it */
+      if (x->type == LVAL_ERROR) 
+        lval_println(x);
+
+      lval_del(x);
     }
-
-    /* Add line to history */
-    add_history(input);
-
-    /* Parse */
-    YY_BUFFER_STATE buffer = yy_scan_string(input);
-    yyparse();
-    yy_delete_buffer(buffer);
-
-    /* Free buffer */
-    free(input);
-
-    /* Convert input into S-expr */
-    //walk_tree(root, 0);
-    lval* x = lval_read(root);
-    //lval_println(x);
-    x = lval_eval(e, x);
-
-    /* Free string pool used by parser */
-    free_pool();
-
-    /* Perform calculation */
-    lval_println(x);
-    lval_del(x);
+  } else {
+    /* Never-ending prompt */
+    while (1)
+    {
+      /* Output prompt and read user input */
+      char* input = readline("lisp> ");
+  
+      /* Ctrl+D was pressed, terminate session */
+      if (input == NULL)
+      {
+        fputc('\n', stdout);
+        break;
+      }
+  
+      /* Add line to history */
+      add_history(input);
+  
+      /* Parse */
+      YY_BUFFER_STATE buffer = yy_scan_string(input);
+      yyparse();
+      yy_delete_buffer(buffer);
+  
+      /* Free buffer */
+      free(input);
+  
+      /* Convert input into S-expr */
+      //walk_tree(root, 0);
+      lval* x = lval_read(root);
+      //lval_println(x);
+      x = lval_eval(e, x);
+  
+      /* Free string pool used by parser */
+      free_pool();
+  
+      /* Perform calculation */
+      lval_println(x);
+      lval_del(x);
+    }
   }
 
   lenv_del(e);

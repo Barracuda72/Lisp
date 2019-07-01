@@ -76,7 +76,7 @@ tree *root = NULL;
 %}
 
 %token
-  TOK_INTEGER TOK_REAL TOK_SYMBOL
+  TOK_INTEGER TOK_REAL TOK_SYMBOL TOK_STRING
 
 %%
 
@@ -98,6 +98,7 @@ expression_list:
 expression:
   number { $$ = $1; } |
   symbol { $$ = $1; } |
+  string { $$ = $1; } |
   sexpression { $$ = $1; } |
   qexpression { $$ = $1; }
   ;
@@ -112,6 +113,10 @@ sexpression:
 
 symbol:
   TOK_SYMBOL { $$ = (YYSTYPE)tree_create((tree*)mystrdup((char*)$1), NULL, NODE_IDENTIFIER); }
+  ;
+
+string:
+  TOK_STRING { $$ = (YYSTYPE)tree_create((tree*)mystrdup((char*)$1), NULL, NODE_CSTRING); }
   ;
 
 number:
