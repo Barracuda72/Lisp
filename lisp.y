@@ -27,7 +27,7 @@ char* mystrdup(const char* s)
   return d;
 }
 
-void free_pool(void)
+void parser_free_pool(void)
 {
   for (int i = 0; i < pool_size; i++)
     free(pool[i]);

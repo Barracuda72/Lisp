@@ -11,7 +11,7 @@ else
   CFLAGS += -O2
 endif
 
-$(TARGET): main.o tree.o y.tab.o lex.yy.o
+$(TARGET): parser.o lenv.o lval.o builtins.o main.o tree.o y.tab.o lex.yy.o
 	$(LD) $(LDFLAGS) $^ -o $@
 
 y.tab.c: lisp.y
